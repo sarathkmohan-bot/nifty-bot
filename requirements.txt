@@ -1,6 +1,7 @@
-tensorflow==2.15.0
+python-telegram-bot==20.7
 yfinance
-numpy
 pandas
+numpy
+scikit-learn
+flask
 requests
-pytz
