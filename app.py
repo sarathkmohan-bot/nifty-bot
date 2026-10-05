@@ -6,8 +6,8 @@ from flask import Flask
 app = Flask(__name__)
 
 # --- CONFIG ---
-BOT_TOKEN = "YOUR_BOT_TOKEN"
-CHAT_ID = "YOUR_CHAT_ID"
+BOT_TOKEN = "8963319163:AAF5pnWLdDB5eEX-7EZ4Vvk-mhZu4rixzDk"
+CHAT_ID = "5444253276"
 SYMBOL = "^NSEI" # Nifty
 history = [] # last 60 closes
 in_position = False
