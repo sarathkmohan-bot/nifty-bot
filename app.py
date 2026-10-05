@@ -20,18 +20,26 @@ def send_telegram(msg):
     except: pass
 
 def get_nifty():
+    # Method 1: Direct Yahoo API (no crumb needed)
     try:
-        ticker = yf.Ticker(SYMBOL)
-        # Try intraday first
-        data = ticker.history(period="1d", interval="1m")
-        if not data.empty:
-            return float(data['Close'].iloc[-1])
-        # Fallback daily for weekend
-        data = ticker.history(period="5d", interval="1d")
+        headers = {'User-Agent': 'Mozilla/5.0'}
+        url = "https://query1.finance.yahoo.com/v8/finance/chart/%5ENSEI"
+        r = requests.get(url, headers=headers, timeout=10)
+        if r.status_code == 200:
+            j = r.json()
+            price = j['chart']['result'][0]['meta']['regularMarketPrice']
+            return float(price)
+    except Exception as e:
+        print(f"direct api fail {e}")
+
+    # Method 2: Fallback yfinance
+    try:
+        ticker = yf.Ticker("^NSEI")
+        data = ticker.history(period="5d")
         if not data.empty:
             return float(data['Close'].iloc[-1])
     except Exception as e:
-        print(f"yfinance err {e}")
+        print(f"yf fail {e}")
     return None
 
 def trading_loop():
