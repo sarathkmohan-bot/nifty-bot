@@ -1,6 +1,6 @@
 import time, requests, numpy as np
 from flask import Flask
-from tensorflow.keras.models import load_model # ninte model undel
+#from tensorflow.keras.models import load_model # ninte model undel
 # ninte existing imports same vekku
 
 app = Flask(__name__)
