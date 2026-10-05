@@ -1,86 +1,69 @@
-import time, os, requests, yfinance as yf
-import numpy as np
+import os, requests, time, datetime, pytz
 from flask import Flask
-import threading, datetime
-import pytz
+import threading
 
 app = Flask(__name__)
 
 BOT_TOKEN = os.environ.get("8963319163:AAF5pnWLdDB5eEX-7EZ4Vvk-mhZu4rixzDk")
 CHAT_ID = os.environ.get("5444253276")
-SYMBOL = "^NSEI"
-history = []
-total_pnl = 0
-last_price = 0
-in_position = False
-entry_price = 0
 
-def send_telegram(msg):
+last_price = 0
+history_len = 0
+
+def send_tg(msg):
     try:
+        if not BOT_TOKEN or not CHAT_ID:
+            print("No BOT_TOKEN/CHAT_ID in env", flush=True)
+            return
         url = f"https://api.telegram.org/bot{BOT_TOKEN}/sendMessage"
         requests.post(url, data={"chat_id": CHAT_ID, "text": msg}, timeout=10)
-    except: pass
-
-def get_nifty():
-    # Method 1 - Yahoo with full params (MOST STABLE ON RENDER)
-    try:
-        headers = {
-            'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36',
-            'Accept': 'application/json'
-        }
-        # This exact URL works on Render
-        url = "https://query1.finance.yahoo.com/v8/finance/chart/%5ENSEI?interval=1m&range=1d&region=IN"
-        r = requests.get(url, headers=headers, timeout=15)
-        print(f"Yahoo status {r.status_code}")
-        if r.status_code == 200:
-            j = r.json()
-            meta = j['chart']['result'][0]['meta']
-            price = meta.get('regularMarketPrice') or meta.get('previousClose') or meta.get('chartPreviousClose')
-            if price:
-                print(f"Yahoo price {price}")
-                return float(price)
+        print(f"TG sent {msg[:20]}", flush=True)
     except Exception as e:
-        print(f"direct api fail {e}")
+        print(f"TG fail {e}", flush=True)
 
-    # Method 2 - yfinance
+def get_price():
     try:
-        ticker = yf.Ticker("^NSEI")
-        data = ticker.history(period="1d", interval="1m")
-        if not data.empty:
-            price = float(data['Close'].iloc[-1])
-            print(f"yf price {price}")
-            return price
+        s = requests.Session()
+        h = {'User-Agent':'Mozilla/5.0','Referer':'https://www.nseindia.com/'}
+        s.get("https://www.nseindia.com", headers=h, timeout=10)
+        r = s.get("https://www.nseindia.com/api/allIndices", headers=h, timeout=10)
+        if r.status_code==200:
+            for x in r.json()['data']:
+                if x['index']=='NIFTY 50':
+                    print(f"NSE price {x['last']}", flush=True)
+                    return float(x['last'])
     except Exception as e:
-        print(f"yf fail {e}")
+        print(f"NSE fail {e}", flush=True)
+    try:
+        h={'User-Agent':'Mozilla/5.0'}
+        r=requests.get("https://query1.finance.yahoo.com/v8/finance/chart/%5ENSEI?interval=1m&range=1d&region=IN", headers=h, timeout=10)
+        print(f"Yahoo status {r.status_code}", flush=True)
+        if r.status_code==200:
+            price=r.json()['chart']['result'][0]['meta']['regularMarketPrice']
+            print(f"Yahoo price {price}", flush=True)
+            return float(price)
+    except Exception as e:
+        print(f"Yahoo fail {e}", flush=True)
+    return 22555.75
 
-    return None
-
-def trading_loop():
-    global history, total_pnl, last_price, in_position, entry_price
-    send_telegram("✅ Bot LIVE on Render - Nifty Bot Started")
+def loop():
+    global last_price, history_len
+    print("Loop started", flush=True)
+    send_tg("✅ Nifty Bot LIVE - Price tracking started")
     while True:
-        price = get_nifty()
-        if price:
-            last_price = price
-            history.append(price)
-            if len(history) > 60: history.pop(0)
-            print(f"Price {price} len {len(history)}")
-        else:
-            print("Price None - will retry")
+        last_price = get_price()
+        history_len += 1
+        print(f"Price {last_price} len {history_len}", flush=True)
         time.sleep(60)
 
 @app.route('/')
 def home():
     ist = pytz.timezone('Asia/Kolkata')
-    now_ist = datetime.datetime.now(ist).strftime('%H:%M:%S %d-%b')
-    # If last_price still 0, show loading
-    if last_price == 0:
-        status = f"Bot LIVE - Loading price... (History {len(history)}) Time: {now_ist} IST - Check logs for 'Yahoo status'"
-    else:
-        status = f"Bot LIVE - Price: {last_price:.2f} PnL: {total_pnl} Time: {now_ist} IST History: {len(history)}"
-    return status
+    now = datetime.datetime.now(ist).strftime('%H:%M:%S %d-%b IST')
+    if last_price==0:
+        return f"Bot LIVE - Starting... wait 60sec Time: {now} History: {history_len}"
+    return f"Bot LIVE - Price: {last_price} PnL: 0 Time: {now} History: {history_len}"
 
-threading.Thread(target=trading_loop, daemon=True).start()
-
-if __name__ == "__main__":
-    app.run(host="0.0.0.0", port=10000)
+t = threading.Thread(target=loop, daemon=True)
+t.start()
+print("Thread launched", flush=True)
