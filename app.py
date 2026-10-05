@@ -29,12 +29,15 @@ def send_text(msg):
 def send_chart(caption, df):
     try:
         plt.figure(figsize=(10,5))
-        plt.plot(df.index, df['Close'], label='NIFTY')
+        x = range(len(df))
+        plt.plot(x, df['Close'], label='NIFTY')
         if 'EMA9' in df.columns:
-            plt.plot(df.index, df['EMA9'], label='EMA9')
-            plt.plot(df.index, df['EMA21'], label='EMA21')
-        plt.legend(); plt.grid(alpha=0.3); plt.xticks(rotation=20)
-        plt.title("NIFTY 15min EMA")
+            plt.plot(x, df['EMA9'], label='EMA9')
+            plt.plot(x, df['EMA21'], label='EMA21')
+        plt.legend(); plt.grid(alpha=0.3)
+        step = max(1, len(df)//6)
+        plt.xticks(list(x)[::step], [d.strftime('%d %H:%M') for d in df.index[::step]], rotation=20)
+        plt.title("NIFTY 15min EMA - No Weekend Gap")
         plt.tight_layout()
         buf = io.BytesIO()
         plt.savefig(buf, format='png', dpi=130)
@@ -48,7 +51,6 @@ def send_chart(caption, df):
     except Exception as e:
         print("Chart error:", e)
         return send_text(caption + f"\nChart error: {e}")
-
 def get_nifty_live():
     try:
         s = requests.Session()
