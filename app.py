@@ -84,7 +84,7 @@ def home():
     price = round(float(df['Close'].iloc[-1]),2)
     # chart for web
     plt.figure(figsize=(8,4))
-    plt.plot(df.index, df['Close']); plt.plot(df.index, df['EMA9']); plt.plot(df.index, df['EMA21'])
+    plt.plot(range(len(df)), df['Close']); plt.plot(df.index, df['EMA9']); plt.plot(df.index, df['EMA21'])
     buf = io.BytesIO(); plt.savefig(buf, format='png'); buf.seek(0); plt.close()
     b64 = base64.b64encode(buf.read()).decode()
     return f"Bot LIVE ✅<br>NIFTY Live: {live} | 15m: {price}<br>{ist}<br><img src='data:image/png;base64,{b64}' style='width:100%;max-width:700px'><br><br><a href='/telegram'>Test Chart</a> | <a href='/debug'>Debug</a>"
