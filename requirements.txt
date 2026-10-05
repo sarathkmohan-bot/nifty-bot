@@ -7,3 +7,4 @@ flask
 requests
 gunicorn
 pytz
+matplotlib
