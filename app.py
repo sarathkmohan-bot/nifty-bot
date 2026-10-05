@@ -1,34 +1,34 @@
-import time, requests, numpy as np
+import time, os, requests, yfinance as yf
+import numpy as np
 from flask import Flask
-#from tensorflow.keras.models import load_model # ninte model undel
-# ninte existing imports same vekku
+import threading
 
 app = Flask(__name__)
 
-# --- CONFIG ---
-BOT_TOKEN = "8963319163:AAF5pnWLdDB5eEX-7EZ4Vvk-mhZu4rixzDk"
-CHAT_ID = "5444253276"
-SYMBOL = "^NSEI" # Nifty
-history = [] # last 60 closes
+BOT_TOKEN = os.environ.get("BOT_TOKEN", "8963319163:AAF5pnWLdDB5eEX-7EZ4Vvk-mhZu4rixzDk")  # Render env var ninnu edukkum
+CHAT_ID = os.environ.get("CHAT_ID", "5444253276")
+SYMBOL = "^NSEI"
+history = []
 in_position = False
 entry_price = 0
 total_pnl = 0
 
 def send_telegram(msg):
-    url = f"https://api.telegram.org/bot{BOT_TOKEN}/sendMessage"
-    requests.post(url, data={"chat_id": CHAT_ID, "text": msg})
+    try:
+        url = f"https://api.telegram.org/bot{BOT_TOKEN}/sendMessage"
+        requests.post(url, data={"chat_id": CHAT_ID, "text": msg}, timeout=10)
+    except Exception as e:
+        print(e)
 
 def get_nifty():
-    # ninte existing NSE function same
     try:
-        #... your NSE fetch logic...
-        return current_price
-    except:
-        return None
-
-@app.route('/')
-def home():
-    return "Bot6 LIVE - EMA Filter"
+        ticker = yf.Ticker(SYMBOL)
+        data = ticker.history(period="1d", interval="1m")
+        if not data.empty:
+            return float(data['Close'].iloc[-1])
+    except Exception as e:
+        print(e)
+    return None
 
 def trading_loop():
     global in_position, entry_price, total_pnl, history
@@ -37,50 +37,43 @@ def trading_loop():
         if price is None:
             time.sleep(60)
             continue
-
         history.append(price)
         if len(history) > 60:
             history.pop(0)
-
         if len(history) < 60:
-            time.sleep(900)
+            print(f"Collecting {len(history)}/60")
+            time.sleep(60)
             continue
-
-        # --- LSTM PREDICTION (ninte model) ---
-        # x = np.array(history).reshape...
-        # predicted = model.predict(x)[0][0]
-        predicted = price + np.random.randn()*10 # TEST - ninte model prediction ivide
-
-        diff = predicted - price # CLIP OZHIVAKKI - full diff vekku
-
-        # --- NEW EMA FILTER - ithaan main fix ---
-        ema20 = np.mean(history[-20:]) # last 20 average = EMA simple
+        
+        # EMA20 filter - NEW
+        ema20 = float(np.mean(history[-20:]))
         is_uptrend = price > ema20 + 5
         is_downtrend = price < ema20 - 5
-
-        # --- PAPER TRADING LOGIC ---
-        if is_uptrend and diff > 5 and not in_position:
+        
+        # Simple momentum pred (replace with your LSTM if you have)
+        diff = history[-1] - history[-5]  # 5 min momentum
+        
+        if is_uptrend and diff > 2 and not in_position:
             entry_price = price
             in_position = True
-            send_telegram(f"🟢 PAPER BUY\nNIFTY: {price:.2f} (+{price-ema20:.2f} above EMA)\nEMA20: {ema20:.2f}\nPred Diff: {diff:.2f}\nEntry: {entry_price:.2f}")
+            send_telegram(f"🟢 PAPER BUY\nNIFTY: {price:.2f}\nEMA20: {ema20:.2f} (+{price-ema20:.1f})\nDiff: {diff:.2f}")
 
-        elif is_downtrend and diff < -5 and in_position:
+        elif is_downtrend and diff < -2 and in_position:
             pnl = price - entry_price
             total_pnl += pnl
             in_position = False
             send_telegram(f"🔴 PAPER SELL\nNIFTY: {price:.2f}\nTrade PnL: {pnl:.2f}\nTotal PnL: {total_pnl:.2f}")
-
         else:
             trend = "BULLISH" if is_uptrend else "BEARISH" if is_downtrend else "SIDEWAYS"
-            status = "IN POSITION" if in_position else "NO POSITION"
-            send_telegram(f"⏳ WAIT - {trend} - {status}\nNIFTY: {price:.2f} EMA20: {ema20:.2f} Diff: {diff:.2f}\nTotal PnL: {total_pnl:.2f}")
+            print(f"WAIT {trend} {price:.2f} EMA {ema20:.2f} Diff {diff:.2f}")
+        
+        time.sleep(300) # 5 min for testing
 
-        time.sleep(900) # 15 min
+@app.route('/')
+def home():
+    return f"Bot LIVE - Price: {history[-1] if history else 0} PnL: {total_pnl}"
 
-# Start loop in background
-import threading
 threading.Thread(target=trading_loop, daemon=True).start()
 
 if __name__ == "__main__":
-    send_telegram("✅ nifty-bot-6 STARTED - Paper Money + EMA Filter + Real Nifty ₹1L Virtual")
     app.run(host="0.0.0.0", port=10000)
