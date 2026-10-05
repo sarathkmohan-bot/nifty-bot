@@ -11,8 +11,8 @@ import io, base64
 
 app = Flask(__name__)
 
-BOT_TOKEN = os.environ.get("8963319163:AAF5pnWLdDB5eEX-7EZ4Vvk-mhZu4rixzDk","").strip()
-CHAT_ID = os.environ.get("5444253276","").strip()
+BOT_TOKEN = "8963319163:AAF5pnWLdDB5eEX-7EZ4Vvk-mhZu4rixzDk"
+CHAT_ID = "5444253276"
 
 # paper trade
 trade_state = {"position": None, "entry": 0, "pnl": 0, "capital": 100000}
