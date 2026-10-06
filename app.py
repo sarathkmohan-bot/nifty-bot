@@ -10,8 +10,8 @@ app = Flask(__name__)
 
 BALANCE_FILE = "balance.json"
 INITIAL_BALANCE = 100000
-TELE_TOKEN = "8963319163:AAF5pnWLdDB5eEX-7EZ4Vvk-mhZu4rixzDk"
-CHAT_ID = "5444253276"
+TELE_TOKEN = os.getenv("8963319163:AAF5pnWLdDB5eEX-7EZ4Vvk-mhZu4rixzDk")
+CHAT_ID = os.getenv("5444253276")
 
 def get_balance():
     if not os.path.exists(BALANCE_FILE):
