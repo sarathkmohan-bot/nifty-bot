@@ -1,121 +1,124 @@
-from apscheduler.schedulers.background import BackgroundScheduler
-import os
-from flask import Flask
-import requests
-import datetime, pytz
 import yfinance as yf
 import pandas as pd
 import matplotlib
 matplotlib.use('Agg')
 import matplotlib.pyplot as plt
-import io, base64
+from flask import Flask, send_file
+import os, json, datetime
+import requests
 
 app = Flask(__name__)
 
-BOT_TOKEN = "8963319163:AAF5pnWLdDB5eEX-7EZ4Vvk-mhZu4rixzDk"
-CHAT_ID = "5444253276"
+BALANCE_FILE = "balance.json"
+INITIAL_BALANCE = 100000
+TELE_TOKEN = os.getenv("8963319163:AAF5pnWLdDB5eEX-7EZ4Vvk-mhZu4rixzDk")
+CHAT_ID = os.getenv("5444253276")
 
-# paper trade
-trade_state = {"position": None, "entry": 0, "pnl": 0, "capital": 100000}
+def get_balance():
+    if not os.path.exists(BALANCE_FILE):
+        return {"balance": INITIAL_BALANCE, "qty": 0, "trades": []}
+    with open(BALANCE_FILE) as f:
+        return json.load(f)
 
-def send_text(msg):
-    try:
-        url = f"https://api.telegram.org/bot{BOT_TOKEN}/sendMessage"
-        requests.post(url, data={"chat_id": CHAT_ID, "text": msg}, timeout=15)
-        return True
-    except:
-        return False
+def save_balance(data):
+    with open(BALANCE_FILE, "w") as f:
+        json.dump(data, f)
 
-def send_chart(caption, df):
-    try:
-        plt.figure(figsize=(10,5))
-        x = range(len(df))
-        plt.plot(x, df['Close'], label='NIFTY')
-        if 'EMA9' in df.columns:
-            plt.plot(x, df['EMA9'], label='EMA9')
-            plt.plot(x, df['EMA21'], label='EMA21')
-        plt.legend(); plt.grid(alpha=0.3)
-        step = max(1, len(df)//6)
-        plt.xticks(list(x)[::step], [d.strftime('%d %H:%M') for d in df.index[::step]], rotation=20)
-        plt.title("NIFTY 15min EMA - No Weekend Gap")
-        plt.tight_layout()
-        buf = io.BytesIO()
-        plt.savefig(buf, format='png', dpi=130)
-        buf.seek(0); plt.close()
-        url = f"https://api.telegram.org/bot{BOT_TOKEN}/sendPhoto"
-        files = {'photo': ('chart.png', buf, 'image/png')}
-        data = {'chat_id': CHAT_ID, 'caption': caption}
-        r = requests.post(url, files=files, data=data, timeout=20)
-        print("Chart send:", r.text)
-        return r.status_code == 200
-    except Exception as e:
-        print("Chart error:", e)
-        return send_text(caption + f"\nChart error: {e}")
-def get_nifty_live():
-    try:
-        s = requests.Session()
-        headers = {'User-Agent': 'Mozilla/5.0','Referer':'https://www.nseindia.com/'}
-        s.get("https://www.nseindia.com", headers=headers, timeout=8)
-        r = s.get("https://www.nseindia.com/api/allIndices", headers=headers, timeout=8)
-        for d in r.json()['data']:
-            if d['index'] == 'NIFTY 50':
-                return d['last']
-    except: pass
-    return "Closed"
+def get_nifty():
+    # FIX: period 5d, interval 15m - 1970 bug varilla
+    df = yf.download("^NSEI", period="5d", interval="15m", progress=False)
+    df.dropna(inplace=True)
+    if isinstance(df.columns, pd.MultiIndex):
+        df.columns = df.columns.get_level_values(0)
+    # EMA strategy
+    df['EMA9'] = df['Close'].ewm(span=9).mean()
+    df['EMA21'] = df['Close'].ewm(span=21).mean()
+    return df
 
-def get_df():
-    try:
-        df = yf.download("^NSEI", period="5d", interval="15m", progress=False, auto_adjust=True)
-        if df.empty: return None
-        if isinstance(df.columns, pd.MultiIndex):
-            df.columns = df.columns.get_level_values(0)
-        df['EMA9'] = df['Close'].ewm(span=9).mean()
-        df['EMA21'] = df['Close'].ewm(span=21).mean()
-        df.dropna(inplace=True)
-        return df.tail(100)
-    except Exception as e:
-        print("yfinance error", e)
-        return None
-
-@app.route('/')
-def home():
-    ist = datetime.datetime.now(pytz.timezone('Asia/Kolkata')).strftime('%d-%b %I:%M %p')
-    live = get_nifty_live()
-    df = get_df()
-    if df is None:
-        return f"Bot LIVE ✅<br>NIFTY: {live}<br>{ist}<br><a href='/telegram'>Test Chart</a> | <a href='/debug'>Debug</a>"
-    price = round(float(df['Close'].iloc[-1]),2)
-    # chart for web
-    plt.figure(figsize=(8,4))
-    plt.plot(range(len(df)), df['Close']); plt.plot(df.index, df['EMA9']); plt.plot(df.index, df['EMA21'])
-    buf = io.BytesIO(); plt.savefig(buf, format='png'); buf.seek(0); plt.close()
-    b64 = base64.b64encode(buf.read()).decode()
-    return f"Bot LIVE ✅<br>NIFTY Live: {live} | 15m: {price}<br>{ist}<br><img src='data:image/png;base64,{b64}' style='width:100%;max-width:700px'><br><br><a href='/telegram'>Test Chart</a> | <a href='/debug'>Debug</a>"
-
-@app.route('/debug')
-def debug():
-    return f"BOT len={len(BOT_TOKEN)} CHAT={CHAT_ID[:4]}***"
-
-@app.route('/telegram')
-def test_tg():
-    live = get_nifty_live()
-    df = get_df()
-    if df is None:
-        send_text(f"✅ Bot working - NIFTY: {live} - but 15m data empty (market closed?)")
-        return "Sent text - df None, market closed?"
-    
-    price = round(float(df['Close'].iloc[-1]),2)
-    # signal
-    if df['EMA9'].iloc[-2] <= df['EMA21'].iloc[-2] and df['EMA9'].iloc[-1] > df['EMA21'].iloc[-1]:
-        sig = "BUY 🔼"
-    elif df['EMA9'].iloc[-2] >= df['EMA21'].iloc[-2] and df['EMA9'].iloc[-1] < df['EMA21'].iloc[-1]:
-        sig = "SELL 🔽"
+def generate_signal(df):
+    last = df.iloc[-1]
+    prev = df.iloc[-2]
+    if prev['EMA9'] < prev['EMA21'] and last['EMA9'] > last['EMA21']:
+        return "BUY"
+    elif prev['EMA9'] > prev['EMA21'] and last['EMA9'] < last['EMA21']:
+        return "SELL"
     else:
-        sig = "HOLD"
+        return "HOLD"
 
-    caption = f"📊 NIFTY 15min\nLive: {live} | 15m: {price}\nSignal: {sig}\nTime: {datetime.datetime.now(pytz.timezone('Asia/Kolkata')).strftime('%I:%M %p')}"
-    ok = send_chart(caption, df)
-    return f"Chart sent={ok} - check Telegram"
+def plot_chart(df):
+    plt.figure(figsize=(10,4))
+    plt.plot(df['Close'][-100:], label="NIFTY")
+    plt.plot(df['EMA9'][-100:], label="EMA9")
+    plt.plot(df['EMA21'][-100:], label="EMA21")
+    plt.legend()
+    plt.title(f"NIFTY {datetime.datetime.now().strftime('%d-%b %I:%M %p')}")
+    plt.tight_layout()
+    plt.savefig("chart.png")
+    plt.close()
+    return "chart.png"
+
+@app.route("/")
+def home():
+    df = get_nifty()
+    port = get_balance()
+    live = round(float(df['Close'].iloc[-1]), 2)
+    pnl = (live * port['qty'] + port['balance'] - INITIAL_BALANCE) if port['qty']>0 else (port['balance']-INITIAL_BALANCE)
+    
+    html = f"""
+    <h2>Bot LIVE ✅ NIFTY: {live}</h2>
+    <h3>💰 Paper Balance: ₹{port['balance']:.2f}</h3>
+    <h3>📦 Qty: {port['qty']} | P&L: ₹{pnl:.2f}</h3>
+    <img src='/chart' style='width:100%'>
+    <h3>Trades:</h3>
+    <pre>{json.dumps(port['trades'][-10:], indent=2)}</pre>
+    <a href='/telegram'>Test Telegram</a> | <a href='/debug'>Debug</a>
+    """
+    return html
+
+@app.route("/chart")
+def chart_route():
+    df = get_nifty()
+    f = plot_chart(df)
+    return send_file(f, mimetype='image/png')
+
+@app.route("/telegram")
+def telegram():
+    df = get_nifty()
+    signal = generate_signal(df)
+    port = get_balance()
+    live = float(df['Close'].iloc[-1])
+    chart = plot_chart(df)
+    
+    # Paper trading execution
+    msg = ""
+    if signal == "BUY" and port['qty']==0:
+        qty = int(port['balance'] // live)
+        if qty>0:
+            port['balance'] -= qty*live
+            port['qty'] = qty
+            port['trades'].append({"type":"BUY","price":live,"time":str(datetime.datetime.now())})
+            msg = f"🟢 AUTO BUY {qty} @ {live}"
+            save_balance(port)
+    elif signal == "SELL" and port['qty']>0:
+        port['balance'] += port['qty']*live
+        port['trades'].append({"type":"SELL","price":live,"time":str(datetime.datetime.now()),"qty":port['qty']})
+        msg = f"🔴 AUTO SELL {port['qty']} @ {live}"
+        port['qty']=0
+        save_balance(port)
+    
+    caption = f"Bot LIVE ✅\nNIFTY: {live}\nSignal: {signal}\n{msg}\nBalance: ₹{port['balance']:.0f} | Qty: {port['qty']}"
+    
+    if TELE_TOKEN and CHAT_ID:
+        url = f"https://api.telegram.org/bot{TELE_TOKEN}/sendPhoto"
+        with open(chart, 'rb') as photo:
+            requests.post(url, data={"chat_id":CHAT_ID,"caption":caption}, files={"photo":photo})
+    
+    return caption
+
+@app.route("/debug")
+def debug():
+    df = get_nifty()
+    return f"Rows: {len(df)} Last: {df.index[-1]} Close: {df['Close'].iloc[-1]}"
 
 if __name__ == "__main__":
-    app.run(host="0.0.0.0", port=10000)
+    app.run(host="0.0.0.0", port=int(os.environ.get("PORT",10000)))
