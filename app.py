@@ -11,7 +11,7 @@ from datetime import datetime
 
 app = Flask(__name__)
 
-TELEGRAM_TOKEN = os.getenv("8963319163:AAF5pnWLdDB5eEX-7EZ4Vvk-mhZu4rixzDk")
+TELEGRAM_TOKEN = os.getenv("8953473055:AAFfDlDPCeOb7jbOKHc3dGjFHFY-sUM6xTg")
 CHAT_ID = os.getenv("5444253276")
 
 balance = 100000
