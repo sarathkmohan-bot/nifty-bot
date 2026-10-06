@@ -14,15 +14,16 @@ app = Flask(__name__)
 TELEGRAM_TOKEN = os.getenv("8963319163:AAF5pnWLdDB5eEX-7EZ4Vvk-mhZu4rixzDk")
 CHAT_ID = os.getenv("5444253276")
 
-# Paper trading
 balance = 100000
 qty = 0
 pnl = 0
 last_buy_price = 0
 
 def get_nifty_data():
-    # US server il NSE block, athukond yfinance use cheyyunnu - 100% work
-    data = yf.download("^NSEI", period="5d", interval="15m", progress=False)
+    data = yf.download("^NSEI", period="5d", interval="15m", progress=False, auto_adjust=False)
+    # FIX for new yfinance - flatten columns
+    if isinstance(data.columns, pd.MultiIndex):
+        data.columns = data.columns.get_level_values(0)
     data.dropna(inplace=True)
     data['EMA9'] = data['Close'].ewm(span=9).mean()
     data['EMA21'] = data['Close'].ewm(span=21).mean()
@@ -31,7 +32,6 @@ def get_nifty_data():
 def get_signal(data):
     last = data.iloc[-1]
     prev = data.iloc[-2]
-    # BUY: EMA9 crosses above EMA21
     if prev['EMA9'] < prev['EMA21'] and last['EMA9'] > last['EMA21']:
         return "BUY"
     elif prev['EMA9'] > prev['EMA21'] and last['EMA9'] < last['EMA21']:
@@ -42,24 +42,24 @@ def get_signal(data):
 def send_telegram_chart(data, signal, price):
     global balance, qty, pnl, last_buy_price
     
-    # Paper trading logic
     msg_extra = ""
+    price_val = float(price)
     if signal == "BUY" and qty == 0:
         qty = 1
-        last_buy_price = float(price)
-        balance -= float(price)
-        msg_extra = f"\nAUTO BUY @ {price:.1f}"
+        last_buy_price = price_val
+        balance -= price_val
+        msg_extra = f"\nAUTO BUY @ {price_val:.1f}"
     elif signal == "SELL" and qty > 0:
-        pnl = float(price) - last_buy_price
-        balance += float(price)
+        pnl = price_val - last_buy_price
+        balance += price_val
         qty = 0
-        msg_extra = f"\nAUTO SELL @ {price:.1f} | P&L: {pnl:.1f}"
+        msg_extra = f"\nAUTO SELL @ {price_val:.1f} | P&L: {pnl:.1f}"
 
     plt.figure(figsize=(8,5))
     plt.plot(data['Close'].tail(50), label='NIFTY', color='blue')
     plt.plot(data['EMA9'].tail(50), label='EMA9', color='orange')
     plt.plot(data['EMA21'].tail(50), label='EMA21', color='green')
-    plt.title(f"NIFTY 15m - {signal} - {price:.1f}")
+    plt.title(f"NIFTY 15m - {signal} - {price_val:.1f}")
     plt.legend()
     plt.grid(True)
     
@@ -68,7 +68,7 @@ def send_telegram_chart(data, signal, price):
     buf.seek(0)
     plt.close()
 
-    caption = f"NIFTY 15m\nLive: {price:.1f}\nSignal: {signal}\nTime: {datetime.now().strftime('%I:%M %p')}\nPaper: Rs.{balance:.0f}\nQty: {qty} | P&L: Rs.{pnl:.0f}{msg_extra}"
+    caption = f"NIFTY 15m\nLive: {price_val:.1f}\nSignal: {signal}\nTime: {datetime.now().strftime('%I:%M %p')}\nPaper: Rs.{balance:.0f}\nQty: {qty} | P&L: Rs.{pnl:.0f}{msg_extra}"
 
     url = f"https://api.telegram.org/bot{TELEGRAM_TOKEN}/sendPhoto"
     files = {'photo': buf}
@@ -80,9 +80,10 @@ def send_telegram_chart(data, signal, price):
 def home():
     try:
         df = get_nifty_data()
+        # FIX: .item() use cheythu value edukkum
         price = float(df['Close'].iloc[-1])
         signal = get_signal(df)
-        return f"NIFTY 15m<br>Live: {price:.1f}<br>Signal: {signal}<br>Time: {datetime.now().strftime('%I:%M %p')}<br><br>Paper: Rs.{balance:.0f}<br>Qty: {qty} | P&L: Rs.{pnl:.0f}<br><br><a href='/telegram'>Send Telegram</a>"
+        return f"NIFTY 15m<br>Live: {price:.1f}<br>Signal: {signal}<br>Time: {datetime.now().strftime('%I:%M %p')}<br><br><a href='/telegram'>Send Telegram</a>"
     except Exception as e:
         return f"Error: {e}"
 
