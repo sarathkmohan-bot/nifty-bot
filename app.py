@@ -17,22 +17,24 @@ CHAT_ID = os.getenv("5444253276")
 def get_balance():
     if not os.path.exists(BALANCE_FILE):
         return {"balance": INITIAL_BALANCE, "qty": 0, "trades": []}
-    with open(BALANCE_FILE) as f:
-        return json.load(f)
+    try:
+        with open(BALANCE_FILE) as f:
+            return json.load(f)
+    except:
+        return {"balance": INITIAL_BALANCE, "qty": 0, "trades": []}
 
 def save_balance(data):
     with open(BALANCE_FILE, "w") as f:
         json.dump(data, f)
 
 def get_nifty():
-    # FIX: period 5d, interval 15m - 1970 bug varilla
-    df = yf.download("^NSEI", period="5d", interval="15m", progress=False)
+    df = yf.download("^NSEI", period="5d", interval="15m", progress=False, auto_adjust=False)
     df.dropna(inplace=True)
     if isinstance(df.columns, pd.MultiIndex):
         df.columns = df.columns.get_level_values(0)
-    # EMA strategy
     df['EMA9'] = df['Close'].ewm(span=9).mean()
     df['EMA21'] = df['Close'].ewm(span=21).mean()
+    df = df.tail(80)  # No weekend gap, clean chart
     return df
 
 def generate_signal(df):
@@ -47,11 +49,15 @@ def generate_signal(df):
 
 def plot_chart(df):
     plt.figure(figsize=(10,4))
-    plt.plot(df['Close'][-100:], label="NIFTY")
-    plt.plot(df['EMA9'][-100:], label="EMA9")
-    plt.plot(df['EMA21'][-100:], label="EMA21")
-    plt.legend()
-    plt.title(f"NIFTY {datetime.datetime.now().strftime('%d-%b %I:%M %p')}")
+    x = range(len(df))
+    plt.plot(x, df['Close'], label="NIFTY")
+    plt.plot(x, df['EMA9'], label="EMA9")
+    plt.plot(x, df['EMA21'], label="EMA21")
+    labels = [d.strftime("%d %H:%M") for d in df.index]
+    plt.xticks(x[::10], labels[::10], rotation=30, fontsize=7)
+    plt.legend(fontsize=8)
+    plt.title(f"NIFTY 15min - {datetime.datetime.now().strftime('%d-%b %I:%M %p')}")
+    plt.grid(alpha=0.3)
     plt.tight_layout()
     plt.savefig("chart.png")
     plt.close()
@@ -63,15 +69,12 @@ def home():
     port = get_balance()
     live = round(float(df['Close'].iloc[-1]), 2)
     pnl = (live * port['qty'] + port['balance'] - INITIAL_BALANCE) if port['qty']>0 else (port['balance']-INITIAL_BALANCE)
-    
     html = f"""
-    <h2>Bot LIVE ✅ NIFTY: {live}</h2>
-    <h3>💰 Paper Balance: ₹{port['balance']:.2f}</h3>
-    <h3>📦 Qty: {port['qty']} | P&L: ₹{pnl:.2f}</h3>
+    <h2>Bot LIVE NIFTY: {live}</h2>
+    <h3>Paper Balance: Rs.{port['balance']:.2f}</h3>
+    <h3>Qty: {port['qty']} | P&L: Rs.{pnl:.2f}</h3>
     <img src='/chart' style='width:100%'>
-    <h3>Trades:</h3>
-    <pre>{json.dumps(port['trades'][-10:], indent=2)}</pre>
-    <a href='/telegram'>Test Telegram</a> | <a href='/debug'>Debug</a>
+    <a href='/telegram'>Test Telegram</a>
     """
     return html
 
@@ -88,8 +91,9 @@ def telegram():
     port = get_balance()
     live = float(df['Close'].iloc[-1])
     chart = plot_chart(df)
+    pnl = (live * port['qty'] + port['balance'] - INITIAL_BALANCE) if port['qty']>0 else (port['balance']-INITIAL_BALANCE)
+    now = datetime.datetime.now().strftime("%I:%M %p")
     
-    # Paper trading execution
     msg = ""
     if signal == "BUY" and port['qty']==0:
         qty = int(port['balance'] // live)
@@ -97,28 +101,20 @@ def telegram():
             port['balance'] -= qty*live
             port['qty'] = qty
             port['trades'].append({"type":"BUY","price":live,"time":str(datetime.datetime.now())})
-            msg = f"🟢 AUTO BUY {qty} @ {live}"
+            msg = f"AUTO BUY {qty} @ {live:.2f}"
             save_balance(port)
     elif signal == "SELL" and port['qty']>0:
         port['balance'] += port['qty']*live
-        port['trades'].append({"type":"SELL","price":live,"time":str(datetime.datetime.now()),"qty":port['qty']})
-        msg = f"🔴 AUTO SELL {port['qty']} @ {live}"
+        port['trades'].append({"type":"SELL","price":live,"time":str(datetime.datetime.now())})
+        msg = f"AUTO SELL {port['qty']} @ {live:.2f}"
         port['qty']=0
         save_balance(port)
     
-    caption = f"Bot LIVE ✅\nNIFTY: {live}\nSignal: {signal}\n{msg}\nBalance: ₹{port['balance']:.0f} | Qty: {port['qty']}"
+    caption = f"NIFTY 15min\nLive: {live:.1f}\nSignal: {signal}\nTime: {now}\n\nPaper Balance: Rs.{port['balance']:.0f}\nQty: {port['qty']} | P&L: Rs.{pnl:.0f}"
+    if msg:
+        caption += f"\n{msg}"
     
     if TELE_TOKEN and CHAT_ID:
         url = f"https://api.telegram.org/bot{TELE_TOKEN}/sendPhoto"
-        with open(chart, 'rb') as photo:
-            requests.post(url, data={"chat_id":CHAT_ID,"caption":caption}, files={"photo":photo})
-    
-    return caption
-
-@app.route("/debug")
-def debug():
-    df = get_nifty()
-    return f"Rows: {len(df)} Last: {df.index[-1]} Close: {df['Close'].iloc[-1]}"
-
-if __name__ == "__main__":
-    app.run(host="0.0.0.0", port=int(os.environ.get("PORT",10000)))
+        try:
+           
